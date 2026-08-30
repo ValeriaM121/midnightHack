@@ -14,6 +14,7 @@
 // limitations under the License.
 
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   EnvironmentConfiguration,
   getTestEnvironment,
@@ -31,14 +32,14 @@ export interface Config {
   readonly generateDust: boolean;
 }
 
-export const currentDir = path.resolve(new URL(import.meta.url).pathname, '..');
+export const currentDir = path.resolve(fileURLToPath(import.meta.url), '..');
 
 export class StandaloneConfig implements Config {
   getEnvironment(logger: Logger): TestEnvironment {
     return getTestEnvironment(logger) as TestEnvironment;
   }
   privateStateStoreName = 'bboard-private-state';
-  logDir = path.resolve(currentDir, '..', 'logs', 'standalone', `${new Date().toISOString()}.log`);
+  logDir = path.resolve(currentDir, '..', 'logs', 'standalone', `${new Date().toISOString().replace(/:/g, '-')}.log`);
   zkConfigPath = path.resolve(currentDir, '..', '..', 'contract', 'src', 'managed', 'bboard');
   generateDust = false;
 }
@@ -49,7 +50,7 @@ export class PreviewRemoteConfig implements Config {
     return new PreviewTestEnvironment(logger);
   }
   privateStateStoreName = 'bboard-private-state';
-  logDir = path.resolve(currentDir, '..', 'logs', 'preview-remote', `${new Date().toISOString()}.log`);
+  logDir = path.resolve(currentDir, '..', 'logs', 'preview-remote', `${new Date().toISOString().replace(/:/g, '-')}.log`);
   zkConfigPath = path.resolve(currentDir, '..', '..', 'contract', 'src', 'managed', 'bboard');
   generateDust = true;
 }
@@ -60,7 +61,7 @@ export class PreprodRemoteConfig implements Config {
     return new PreprodTestEnvironment(logger);
   }
   privateStateStoreName = 'bboard-private-state';
-  logDir = path.resolve(currentDir, '..', 'logs', 'preprod-remote', `${new Date().toISOString()}.log`);
+  logDir = path.resolve(currentDir, '..', 'logs', 'preprod-remote', `${new Date().toISOString().replace(/:/g, '-')}.log`);
   zkConfigPath = path.resolve(currentDir, '..', '..', 'contract', 'src', 'managed', 'bboard');
   generateDust = true;
 }

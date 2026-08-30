@@ -1,46 +1,52 @@
-// Ledger as a value
-export interface LedgerType {
-  register: (...args: any[]) => any;
-  verify: (...args: any[]) => any;
-}
-export const Ledger: LedgerType;
+import type * as __compactRuntime from '@midnight-ntwrk/compact-runtime';
 
-// Ledger as a type (for WitnessContext)
-export type Ledger = LedgerType;
+export enum State { VACANT = 0, OCCUPIED = 1 }
 
-// Contract class declaration
-export declare class Contract<T = any> {
-  constructor();
-  create(...args: any[]): any;
-  execute(...args: any[]): any;
-  witnesses: any;
-  circuits: any;
-  provableCircuits: any;
-  initialState: any;
+export type Witnesses<PS> = {
+  localSecretKey(context: __compactRuntime.WitnessContext<Ledger, PS>): [PS, Uint8Array];
 }
 
-export const BBoardContract: typeof Contract;
-
-export const CompiledBBoardContract: {
-  Contract: typeof Contract;
-  Ledger: LedgerType;
-};
-
-declare const _default: {
-  Contract: typeof Contract;
-  Ledger: LedgerType;
-  BBoardContract: typeof Contract;
-  CompiledBBoardContract: {
-    Contract: typeof Contract;
-    Ledger: LedgerType;
-  };
-};
-
-export default _default;
-
-export interface StateType {
-  Active: number;
-  Inactive: number;
-  Pending: number;
+export type ImpureCircuits<PS> = {
+  post(context: __compactRuntime.CircuitContext<PS>, newMessage_0: string): __compactRuntime.CircuitResults<PS, []>;
+  takeDown(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, string>;
 }
-export const State: StateType;
+
+export type ProvableCircuits<PS> = {
+  post(context: __compactRuntime.CircuitContext<PS>, newMessage_0: string): __compactRuntime.CircuitResults<PS, []>;
+  takeDown(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, string>;
+}
+
+export type PureCircuits = {
+  publicKey(sk_0: Uint8Array, sequence_0: Uint8Array): Uint8Array;
+}
+
+export type Circuits<PS> = {
+  post(context: __compactRuntime.CircuitContext<PS>, newMessage_0: string): __compactRuntime.CircuitResults<PS, []>;
+  takeDown(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, string>;
+  publicKey(context: __compactRuntime.CircuitContext<PS>,
+            sk_0: Uint8Array,
+            sequence_0: Uint8Array): __compactRuntime.CircuitResults<PS, Uint8Array>;
+}
+
+export type Ledger = {
+  readonly state: State;
+  readonly message: { is_some: boolean, value: string };
+  readonly sequence: bigint;
+  readonly owner: Uint8Array;
+}
+
+export type ContractReferenceLocations = any;
+
+export declare const contractReferenceLocations : ContractReferenceLocations;
+
+export declare class Contract<PS = any, W extends Witnesses<PS> = Witnesses<PS>> {
+  witnesses: W;
+  circuits: Circuits<PS>;
+  impureCircuits: ImpureCircuits<PS>;
+  provableCircuits: ProvableCircuits<PS>;
+  constructor(witnesses: W);
+  initialState(context: __compactRuntime.ConstructorContext<PS>): __compactRuntime.ConstructorResult<PS>;
+}
+
+export declare function ledger(state: __compactRuntime.StateValue | __compactRuntime.ChargedState): Ledger;
+export declare const pureCircuits: PureCircuits;

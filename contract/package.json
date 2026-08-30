@@ -13,7 +13,7 @@
     }
   },
   "scripts": {
-    "build": "rm -rf dist && tsc --project tsconfig.build.json && cp -Rf ./src/managed ./dist/managed && cp ./src/bboard.compact ./dist",
+    "build": "node -e \"fs.rmSync('dist', {recursive:true, force:true})\" && tsc --project tsconfig.build.json && node -e \"fs.cpSync('src/managed', 'dist/managed', {recursive:true})\" && node -e \"fs.copyFileSync('src/bboard.compact', 'dist/bboard.compact')\"",
     "ci": "npm run compact && npm run typecheck && npm run lint && npm run build && npm run test",
     "compact": "compact compile src/bboard.compact ./src/managed/bboard",
     "lint": "eslint src",

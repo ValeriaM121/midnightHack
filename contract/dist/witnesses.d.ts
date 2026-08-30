@@ -7,5 +7,5 @@ export declare const createBBoardPrivateState: (secretKey: Uint8Array) => {
     secretKey: Uint8Array<ArrayBufferLike>;
 };
 export declare const witnesses: {
-    localSecretKey: ({ privateState, }: WitnessContext<typeof Ledger, BBoardPrivateState>) => [BBoardPrivateState, Uint8Array];
+    localSecretKey: ({ privateState, }: WitnessContext<Ledger, BBoardPrivateState>) => [BBoardPrivateState, Uint8Array];
 };

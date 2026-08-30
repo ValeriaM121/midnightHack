@@ -33,7 +33,9 @@ import {
   type PrivateStateId,
 } from '../../api/src/index';
 import { type WalletFacade } from '@midnight-ntwrk/wallet-sdk-facade';
-import { ledger, type Ledger, State } from '../../contract/src/managed/bboard/contract/index.js';
+import type { Ledger } from '../../contract/src/managed/bboard/contract/index.js';
+import * as ContractModule from '../../contract/src/managed/bboard/contract/index.js';
+const { ledger, State } = ContractModule;
 import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config-provider';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';

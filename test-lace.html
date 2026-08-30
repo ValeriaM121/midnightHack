@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Lace Minimal Test</title>
+</head>
+<body>
+  <h1>Lace Connection Test</h1>
+  <button id="connectBtn">Connect to Lace</button>
+  <pre id="log" style="background: #f4f4f4; padding: 1em; overflow: auto; min-height: 200px;"></pre>
+
+  <script>
+    function logMessage(msg, obj) {
+      const logEl = document.getElementById('log');
+      const text = obj ? msg + '\n' + JSON.stringify(obj, null, 2) : msg;
+      console.log(msg, obj || '');
+      logEl.innerText += text + '\n\n';
+    }
+
+    document.getElementById('connectBtn').addEventListener('click', async () => {
+      try {
+        logMessage('--- STARTING TEST ---');
+        
+        const midnightObj = window.midnight;
+        logMessage('window.midnight:', Object.keys(midnightObj || {}));
+        
+        if (!midnightObj) {
+          logMessage('Error: window.midnight is undefined.');
+          return;
+        }
+
+        const wallets = Object.values(midnightObj);
+        logMessage('Found wallets:', wallets.map(w => w.name || 'unknown'));
+
+        const mnLace = wallets[0];
+        if (!mnLace) {
+          logMessage('Error: mnLace not found.');
+          return;
+        }
+
+        logMessage('mnLace apiVersion:', mnLace.apiVersion);
+        logMessage('mnLace name:', mnLace.name);
+        logMessage('mnLace icon:', mnLace.icon ? 'present' : 'missing');
+
+        logMessage('Calling connect("preprod")...');
+        const connected = await mnLace.connect('preprod');
+        logMessage('connect() succeeded! Returned object keys:', Object.keys(connected || {}));
+        
+        const status = await connected.getConnectionStatus();
+        logMessage('Connection Status:', status);
+
+      } catch (err) {
+        logMessage('ERROR CAUGHT!');
+        logMessage('Error Name:', err.name);
+        logMessage('Error Message:', err.message);
+        logMessage('Error Stack:', err.stack);
+        console.error(err);
+      }
+    });
+  </script>
+</body>
+</html>

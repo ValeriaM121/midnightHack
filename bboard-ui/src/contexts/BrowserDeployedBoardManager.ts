@@ -14,11 +14,11 @@
 // limitations under the License.
 
 import {
-  BBoardAPI,
-  type BBoardCircuitKeys,
-  type BBoardProviders,
-  type DeployedBBoardAPI,
-} from '../../../api/src/index';
+  TravelAPI,
+  type TravelCircuitKeys,
+  type TravelProviders,
+  type DeployedTravelAPI,
+} from '../../../api/src/index.js';
 import { type ContractAddress, fromHex, toHex } from '@midnight-ntwrk/midnight-js-protocol/compact-runtime';
 import {
   BehaviorSubject,
@@ -49,99 +49,43 @@ import {
   Transaction,
   TransactionId,
 } from '@midnight-ntwrk/midnight-js-protocol/ledger';
-import { BBoardPrivateState } from '@midnight-ntwrk/bboard-contract';
+import { type TravelPrivateState } from '../../../contract/src/witnesses.js';
 import { inMemoryPrivateStateProvider } from '../in-memory-private-state-provider';
 import { NetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 import type { UnboundTransaction } from '@midnight-ntwrk/midnight-js-types';
 
-/**
- * An in-progress bulletin board deployment.
- */
 export interface InProgressBoardDeployment {
   readonly status: 'in-progress';
 }
 
-/**
- * A deployed bulletin board deployment.
- */
 export interface DeployedBoardDeployment {
   readonly status: 'deployed';
-
-  /**
-   * The {@link DeployedBBoardAPI} instance when connected to an on network bulletin board contract.
-   */
-  readonly api: DeployedBBoardAPI;
+  readonly api: DeployedTravelAPI;
 }
 
-/**
- * A failed bulletin board deployment.
- */
 export interface FailedBoardDeployment {
   readonly status: 'failed';
-
-  /**
-   * The error that caused the deployment to fail.
-   */
   readonly error: Error;
 }
 
-/**
- * A bulletin board deployment.
- */
 export type BoardDeployment = InProgressBoardDeployment | DeployedBoardDeployment | FailedBoardDeployment;
 
-/**
- * Provides access to bulletin board deployments.
- */
 export interface DeployedBoardAPIProvider {
-  /**
-   * Gets the observable set of board deployments.
-   *
-   * @remarks
-   * This property represents an observable array of {@link BoardDeployment}, each also an
-   * observable. Changes to the array will be emitted as boards are resolved (deployed or joined),
-   * while changes to each underlying board can be observed via each item in the array.
-   */
   readonly boardDeployments$: Observable<Array<Observable<BoardDeployment>>>;
-
-  /**
-   * Joins or deploys a bulletin board contract.
-   *
-   * @param contractAddress An optional contract address to use when resolving.
-   * @returns An observable board deployment.
-   *
-   * @remarks
-   * For a given `contractAddress`, the method will attempt to find and join the identified bulletin board
-   * contract; otherwise it will attempt to deploy a new one.
-   */
   readonly resolve: (contractAddress?: ContractAddress) => Observable<BoardDeployment>;
 }
 
-/**
- * A {@link DeployedBoardAPIProvider} that manages bulletin board deployments in a browser setting.
- *
- * @remarks
- * {@link BrowserDeployedBoardManager} configures and manages a connection to the Midnight Lace
- * wallet, along with a collection of additional providers that work in a web-browser setting.
- */
 export class BrowserDeployedBoardManager implements DeployedBoardAPIProvider {
   readonly #boardDeploymentsSubject: BehaviorSubject<Array<BehaviorSubject<BoardDeployment>>>;
-  #initializedProviders: Promise<BBoardProviders> | undefined;
+  #initializedProviders: Promise<TravelProviders> | undefined;
 
-  /**
-   * Initializes a new {@link BrowserDeployedBoardManager} instance.
-   *
-   * @param logger The `pino` logger to for logging.
-   */
   constructor(private readonly logger: Logger) {
     this.#boardDeploymentsSubject = new BehaviorSubject<Array<BehaviorSubject<BoardDeployment>>>([]);
     this.boardDeployments$ = this.#boardDeploymentsSubject;
   }
 
-  /** @inheritdoc */
   readonly boardDeployments$: Observable<Array<Observable<BoardDeployment>>>;
 
-  /** @inheritdoc */
   resolve(contractAddress?: ContractAddress): Observable<BoardDeployment> {
     const deployments = this.#boardDeploymentsSubject.value;
     let deployment = deployments.find(
@@ -168,20 +112,14 @@ export class BrowserDeployedBoardManager implements DeployedBoardAPIProvider {
     return deployment;
   }
 
-  private getProviders(): Promise<BBoardProviders> {
-    // We use a cached `Promise` to hold the providers. This will:
-    //
-    // 1. Cache and re-use the providers (including the configured connector API), and
-    // 2. Act as a synchronization point if multiple contract deploys or joins run concurrently.
-    //    Concurrent calls to `getProviders()` will receive, and ultimately await, the same
-    //    `Promise`.
+  private getProviders(): Promise<TravelProviders> {
     return this.#initializedProviders ?? (this.#initializedProviders = initializeProviders(this.logger));
   }
 
   private async deployDeployment(deployment: BehaviorSubject<BoardDeployment>): Promise<void> {
     try {
       const providers = await this.getProviders();
-      const api = await BBoardAPI.deploy(providers, this.logger);
+      const api = await TravelAPI.deploy(providers, this.logger);
 
       deployment.next({
         status: 'deployed',
@@ -201,7 +139,7 @@ export class BrowserDeployedBoardManager implements DeployedBoardAPIProvider {
   ): Promise<void> {
     try {
       const providers = await this.getProviders();
-      const api = await BBoardAPI.join(providers, contractAddress, this.logger);
+      const api = await TravelAPI.join(providers, contractAddress, this.logger);
 
       deployment.next({
         status: 'deployed',
@@ -217,16 +155,16 @@ export class BrowserDeployedBoardManager implements DeployedBoardAPIProvider {
 }
 
 /** @internal */
-const initializeProviders = async (logger: Logger): Promise<BBoardProviders> => {
+const initializeProviders = async (logger: Logger): Promise<TravelProviders> => {
   const networkId = import.meta.env.VITE_NETWORK_ID as NetworkId;
   const connectedAPI = await connectToWallet(logger, networkId);
-  const zkConfigPath = window.location.origin; // '../../../contract/src/managed/bboard';
-  const keyMaterialProvider = new FetchZkConfigProvider<BBoardCircuitKeys>(zkConfigPath, fetch.bind(window));
+  const zkConfigPath = window.location.origin;
+  const keyMaterialProvider = new FetchZkConfigProvider<TravelCircuitKeys>(zkConfigPath, fetch.bind(window));
   const config = await connectedAPI.getConfiguration();
-  const inMemoryBBoardPrivateStateProvider = inMemoryPrivateStateProvider<string, BBoardPrivateState>();
+  const inMemoryTravelPrivateStateProvider = inMemoryPrivateStateProvider<string, TravelPrivateState>();
   const shieldedAddresses = await connectedAPI.getShieldedAddresses();
   return {
-    privateStateProvider: inMemoryBBoardPrivateStateProvider,
+    privateStateProvider: inMemoryTravelPrivateStateProvider,
     zkConfigProvider: keyMaterialProvider,
     proofProvider: httpClientProofProvider(config.proverServerUri!, keyMaterialProvider),
     publicDataProvider: indexerPublicDataProvider(config.indexerUri, config.indexerWsUri),
@@ -268,64 +206,87 @@ const initializeProviders = async (logger: Logger): Promise<BBoardProviders> => 
 
 /** @internal */
 const getFirstCompatibleWallet = (): InitialAPI | undefined => {
-  if (!window.midnight) return undefined;
-  return Object.values(window.midnight).find(
-    (wallet): wallet is InitialAPI =>
-      !!wallet &&
-      typeof wallet === 'object' &&
-      'apiVersion' in wallet &&
-      semver.satisfies(wallet.apiVersion, COMPATIBLE_CONNECTOR_API_VERSION),
-  );
+  console.log('--- DIAGNOSTICS: getFirstCompatibleWallet ---');
+  console.log('window.midnight object:', (window as any).midnight);
+  if (!(window as any).midnight) {
+    console.warn('window.midnight is undefined');
+    return undefined;
+  }
+  
+  const wallets = Object.entries((window as any).midnight);
+  console.log('Available wallets:', wallets);
+  
+  for (const [key, wallet] of wallets) {
+    console.log(`Evaluating wallet [${key}]:`, wallet);
+    if (wallet && typeof wallet === 'object' && 'apiVersion' in (wallet as any)) {
+      const apiVersion = (wallet as any).apiVersion;
+      console.log(`Wallet [${key}] apiVersion:`, apiVersion);
+      const isCompatible = semver.satisfies(apiVersion, COMPATIBLE_CONNECTOR_API_VERSION);
+      console.log(`Wallet [${key}] is compatible with ${COMPATIBLE_CONNECTOR_API_VERSION}?`, isCompatible);
+      if (isCompatible) {
+         return wallet as InitialAPI;
+      }
+    } else {
+      console.log(`Wallet [${key}] is missing apiVersion or is not a valid object.`);
+    }
+  }
+  return undefined;
 };
 
 const COMPATIBLE_CONNECTOR_API_VERSION = '4.x';
 
 /** @internal */
-const connectToWallet = (logger: Logger, networkId: string): Promise<ConnectedAPI> => {
+const connectToWallet = async (logger: Logger, networkId: string): Promise<ConnectedAPI> => {
+  console.log('--- DIAGNOSTICS: connectToWallet ---');
+  console.log(`Target Network ID: ${networkId}`);
+  
+  const existingAPI = getFirstCompatibleWallet();
+  if (existingAPI) {
+    console.log('Synchronous wallet API found. Attempting to connect...');
+    try {
+      const connectedAPI = await existingAPI.connect(networkId);
+      console.log('connect() returned successfully:', connectedAPI);
+      const connectionStatus = await connectedAPI.getConnectionStatus();
+      console.log('Connection status:', connectionStatus);
+      return connectedAPI;
+    } catch (error: any) {
+      console.error('existingAPI.connect() threw an error:', error);
+      throw new Error(`Connection Error: ${error?.message || String(error)}`);
+    }
+  }
+
+  console.log('No synchronous wallet API found. Falling back to polling for 1 second...');
   return firstValueFrom(
     fnPipe(
       interval(100),
       map(() => getFirstCompatibleWallet()),
       tap((connectorAPI) => {
-        logger.info(connectorAPI, 'Check for wallet connector API');
+        if (connectorAPI) console.log('Polling found connectorAPI:', connectorAPI);
       }),
       filter((connectorAPI): connectorAPI is InitialAPI => !!connectorAPI),
-      tap((connectorAPI) => {
-        logger.info(connectorAPI, 'Compatible wallet connector API found. Connecting.');
-      }),
       take(1),
       timeout({
         first: 1_000,
         with: () =>
           throwError(() => {
-            logger.error('Could not find wallet connector API');
-
-            return new Error('Could not find Midnight Lace wallet. Extension installed?');
+            console.error('Polling timed out (1 second) without finding a compatible wallet.');
+            return new Error('Could not find Midnight Lace wallet. Extension installed and compatible?');
           }),
       }),
       concatMap(async (initialAPI) => {
-        const connectedAPI = await initialAPI.connect(networkId);
-        const connectionStatus = await connectedAPI.getConnectionStatus();
-        logger.info(connectionStatus, 'Wallet connector API enabled status');
-        return connectedAPI;
+        console.log('Attempting asynchronous connect()...');
+        try {
+          const connectedAPI = await initialAPI.connect(networkId);
+          return connectedAPI;
+        } catch (error: any) {
+          console.error('asynchronous connect() threw an error:', error);
+          throw new Error(`Async Connection Error: ${error?.message || String(error)}`);
+        }
       }),
-      timeout({
-        first: 5_000,
-        with: () =>
-          throwError(() => {
-            logger.error('Wallet connector API has failed to respond');
-
-            return new Error('Midnight Lace wallet has failed to respond. Extension enabled?');
-          }),
-      }),
-      catchError((error, apis) =>
-        error
-          ? throwError(() => {
-              logger.error('Unable to enable connector API' + error);
-              return new Error('Application is not authorized');
-            })
-          : apis,
-      ),
+      catchError((error, apis) => {
+        console.error('catchError triggered in pipeline with error:', error);
+        return throwError(() => error);
+      })
     ),
   );
 };
