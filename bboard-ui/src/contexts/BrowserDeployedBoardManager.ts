@@ -113,13 +113,22 @@ export class BrowserDeployedBoardManager implements DeployedBoardAPIProvider {
   }
 
   private getProviders(): Promise<TravelProviders> {
-    return this.#initializedProviders ?? (this.#initializedProviders = initializeProviders(this.logger));
+    if (!this.#initializedProviders) {
+      this.#initializedProviders = initializeProviders(this.logger).catch((err) => {
+        this.#initializedProviders = undefined;
+        throw err;
+      });
+    }
+    return this.#initializedProviders;
   }
 
   private async deployDeployment(deployment: BehaviorSubject<BoardDeployment>): Promise<void> {
     try {
+      console.log('[deployDeployment] Getting providers...');
       const providers = await this.getProviders();
+      console.log('[deployDeployment] Calling TravelAPI.deploy...');
       const api = await TravelAPI.deploy(providers, this.logger);
+      console.log('[deployDeployment] TravelAPI.deploy succeeded!');
 
       deployment.next({
         status: 'deployed',
@@ -138,8 +147,11 @@ export class BrowserDeployedBoardManager implements DeployedBoardAPIProvider {
     contractAddress: ContractAddress,
   ): Promise<void> {
     try {
+      console.log('[joinDeployment] Getting providers...');
       const providers = await this.getProviders();
+      console.log('[joinDeployment] Calling TravelAPI.join...');
       const api = await TravelAPI.join(providers, contractAddress, this.logger);
+      console.log('[joinDeployment] TravelAPI.join succeeded!');
 
       deployment.next({
         status: 'deployed',
@@ -156,13 +168,27 @@ export class BrowserDeployedBoardManager implements DeployedBoardAPIProvider {
 
 /** @internal */
 const initializeProviders = async (logger: Logger): Promise<TravelProviders> => {
+  console.log('[initializeProviders] Starting...');
   const networkId = import.meta.env.VITE_NETWORK_ID as NetworkId;
+  
+  console.log('[initializeProviders] Calling connectToWallet...');
   const connectedAPI = await connectToWallet(logger, networkId);
+  console.log('[initializeProviders] connectToWallet succeeded!');
+  
   const zkConfigPath = window.location.origin;
   const keyMaterialProvider = new FetchZkConfigProvider<TravelCircuitKeys>(zkConfigPath, fetch.bind(window));
+  
+  console.log('[initializeProviders] Calling connectedAPI.getConfiguration()...');
   const config = await connectedAPI.getConfiguration();
+  console.log('[initializeProviders] getConfiguration succeeded:', config);
+  
   const inMemoryTravelPrivateStateProvider = inMemoryPrivateStateProvider<string, TravelPrivateState>();
+  
+  console.log('[initializeProviders] Calling connectedAPI.getShieldedAddresses()...');
   const shieldedAddresses = await connectedAPI.getShieldedAddresses();
+  console.log('[initializeProviders] getShieldedAddresses succeeded!');
+  
+  console.log('[initializeProviders] Returning providers...');
   return {
     privateStateProvider: inMemoryTravelPrivateStateProvider,
     zkConfigProvider: keyMaterialProvider,
@@ -205,32 +231,30 @@ const initializeProviders = async (logger: Logger): Promise<TravelProviders> => 
 };
 
 /** @internal */
-const getFirstCompatibleWallet = (): InitialAPI | undefined => {
-  console.log('--- DIAGNOSTICS: getFirstCompatibleWallet ---');
-  console.log('window.midnight object:', (window as any).midnight);
+const getCompatibleWallets = (): Array<{ id: string, api: InitialAPI }> => {
+  console.log('--- DIAGNOSTICS: getCompatibleWallets ---');
   if (!(window as any).midnight) {
     console.warn('window.midnight is undefined');
-    return undefined;
+    return [];
   }
   
   const wallets = Object.entries((window as any).midnight);
-  console.log('Available wallets:', wallets);
+  const compatibleWallets: Array<{ id: string, api: InitialAPI }> = [];
   
   for (const [key, wallet] of wallets) {
-    console.log(`Evaluating wallet [${key}]:`, wallet);
-    if (wallet && typeof wallet === 'object' && 'apiVersion' in (wallet as any)) {
+    if (wallet && typeof wallet === 'object') {
       const apiVersion = (wallet as any).apiVersion;
-      console.log(`Wallet [${key}] apiVersion:`, apiVersion);
-      const isCompatible = semver.satisfies(apiVersion, COMPATIBLE_CONNECTOR_API_VERSION);
-      console.log(`Wallet [${key}] is compatible with ${COMPATIBLE_CONNECTOR_API_VERSION}?`, isCompatible);
-      if (isCompatible) {
-         return wallet as InitialAPI;
+      let isCompatible = false;
+      if (apiVersion) {
+        isCompatible = semver.satisfies(apiVersion, COMPATIBLE_CONNECTOR_API_VERSION);
       }
-    } else {
-      console.log(`Wallet [${key}] is missing apiVersion or is not a valid object.`);
+      if (isCompatible) {
+         compatibleWallets.push({ id: key, api: wallet as InitialAPI });
+      }
     }
   }
-  return undefined;
+  
+  return compatibleWallets;
 };
 
 const COMPATIBLE_CONNECTOR_API_VERSION = '4.x';
@@ -240,30 +264,34 @@ const connectToWallet = async (logger: Logger, networkId: string): Promise<Conne
   console.log('--- DIAGNOSTICS: connectToWallet ---');
   console.log(`Target Network ID: ${networkId}`);
   
-  const existingAPI = getFirstCompatibleWallet();
-  if (existingAPI) {
-    console.log('Synchronous wallet API found. Attempting to connect...');
-    try {
-      const connectedAPI = await existingAPI.connect(networkId);
-      console.log('connect() returned successfully:', connectedAPI);
-      const connectionStatus = await connectedAPI.getConnectionStatus();
-      console.log('Connection status:', connectionStatus);
-      return connectedAPI;
-    } catch (error: any) {
-      console.error('existingAPI.connect() threw an error:', error);
-      throw new Error(`Connection Error: ${error?.message || String(error)}`);
+  const existingWallets = getCompatibleWallets();
+  if (existingWallets.length > 0) {
+    console.log(`Found ${existingWallets.length} compatible wallets synchronously. Attempting sequential connection...`);
+    for (const { id, api } of existingWallets) {
+      try {
+        console.log(`[Wallet Selection] Attempting connect() on UUID: ${id}`);
+        const connectedAPI = await api.connect(networkId);
+        console.log(`[Wallet Selection] connect() SUCCESS on UUID: ${id}`);
+        return connectedAPI;
+      } catch (error: any) {
+        const errMsg = error?.message || String(error);
+        console.warn(`[Wallet Selection] connect() FAILED on UUID: ${id}`, errMsg);
+        if (errMsg.includes('shutdown') || errMsg.includes('object can no longer be used')) {
+          console.warn(`[Wallet Selection] UUID ${id} is a dead proxy. Skipping to next wallet...`);
+          continue;
+        }
+        throw new Error(`Connection Error: ${errMsg}`);
+      }
     }
+    throw new Error('All compatible wallets failed to connect (likely due to closed remote channels). Please refresh the page and try again.');
   }
 
   console.log('No synchronous wallet API found. Falling back to polling for 1 second...');
   return firstValueFrom(
     fnPipe(
       interval(100),
-      map(() => getFirstCompatibleWallet()),
-      tap((connectorAPI) => {
-        if (connectorAPI) console.log('Polling found connectorAPI:', connectorAPI);
-      }),
-      filter((connectorAPI): connectorAPI is InitialAPI => !!connectorAPI),
+      map(() => getCompatibleWallets()),
+      filter((wallets) => wallets.length > 0),
       take(1),
       timeout({
         first: 1_000,
@@ -273,19 +301,25 @@ const connectToWallet = async (logger: Logger, networkId: string): Promise<Conne
             return new Error('Could not find Midnight Lace wallet. Extension installed and compatible?');
           }),
       }),
-      concatMap(async (initialAPI) => {
-        console.log('Attempting asynchronous connect()...');
-        try {
-          const connectedAPI = await initialAPI.connect(networkId);
-          return connectedAPI;
-        } catch (error: any) {
-          console.error('asynchronous connect() threw an error:', error);
-          throw new Error(`Async Connection Error: ${error?.message || String(error)}`);
+      concatMap(async (wallets) => {
+        console.log(`Found ${wallets.length} compatible wallets asynchronously. Attempting sequential connection...`);
+        for (const { id, api } of wallets) {
+          try {
+            console.log(`[Wallet Selection] Async Attempting connect() on UUID: ${id}`);
+            const connectedAPI = await api.connect(networkId);
+            console.log(`[Wallet Selection] Async connect() SUCCESS on UUID: ${id}`);
+            return connectedAPI;
+          } catch (error: any) {
+            const errMsg = error?.message || String(error);
+            console.warn(`[Wallet Selection] Async connect() FAILED on UUID: ${id}`, errMsg);
+            if (errMsg.includes('shutdown') || errMsg.includes('object can no longer be used')) {
+               console.warn(`[Wallet Selection] Polled UUID ${id} is a dead proxy. Skipping...`);
+               continue;
+            }
+            throw new Error(`Async Connection Error: ${errMsg}`);
+          }
         }
-      }),
-      catchError((error, apis) => {
-        console.error('catchError triggered in pipeline with error:', error);
-        return throwError(() => error);
+        throw new Error('All polled compatible wallets failed to connect (channels shutdown). Please refresh the page.');
       })
     ),
   );

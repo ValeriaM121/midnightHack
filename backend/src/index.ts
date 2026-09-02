@@ -76,6 +76,14 @@ app.post('/api/travel-rules', async (req, res) => {
         allowedNationalities: ['USA', 'JPN', 'FRA', 'DEU'], // IND needs a visa here
         minimumPassportValidityDays: 180,
         message: 'UK allows these nationalities with 6 months validity.'
+      },
+      FRA: {
+        destination: 'FRA',
+        policyVersion: 'FRA-DEMO-v1',
+        visaRequired: false,
+        allowedNationalities: ['IND', 'USA', 'GBR', 'JPN', 'DEU'],
+        minimumPassportValidityDays: 90,
+        message: 'France allows these nationalities with 3 months validity.'
       }
     };
 

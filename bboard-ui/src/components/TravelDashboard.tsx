@@ -36,9 +36,10 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
   const [errorMessage, setErrorMessage] = useState<string>();
   const [boardState, setBoardState] = useState<TravelDerivedState>();
   const [isWorking, setIsWorking] = useState(!!boardDeployment$);
+  const [progressMessage, setProgressMessage] = useState<string>('');
 
   // Public State
-  const [destination, setDestination] = useState<string>('France');
+  const [destination, setDestination] = useState<string>('');
   const [publicRules, setPublicRules] = useState<any>(null);
 
   // Private State
@@ -51,11 +52,14 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
 
   const onCreateBoard = useCallback(() => {
     setIsWorking(true);
+    setProgressMessage('Connecting to Lace Wallet...');
+    setErrorMessage(undefined);
     boardApiProvider.resolve();
   }, [boardApiProvider]);
   
   const fetchRules = async () => {
     setIsWorking(true);
+    setProgressMessage('Retrieving travel requirements...');
     setLocalError(undefined);
     try {
       const destCodeMap: Record<string, string> = { 'France': 'FRA', 'Japan': 'JPN', 'USA': 'USA', 'Germany': 'DEU', 'UK': 'GBR' };
@@ -76,6 +80,7 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
       setLocalError("Failed to connect to travel rules backend.");
     } finally {
       setIsWorking(false);
+      setProgressMessage('');
     }
   };
 
@@ -119,11 +124,11 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
        return;
     }
 
-    setEligibilityResult('eligible');
-    
+    // Do NOT set 'eligible' yet. Wait for the ZK proof/transaction.
     try {
       if (deployedBoardAPI) {
         setIsWorking(true);
+        setProgressMessage('Generating ZK proof and submitting to Midnight... Please check Lace to approve.');
         const commitment = await generateCommitment(nationalityCode, passportExpiry);
         const message = `Destination: ${publicRules.destination} | Policy: ${publicRules.policyVersion} | Result: ELIGIBLE | Commitment: ${commitment.slice(0,16)}...`;
         
@@ -140,11 +145,23 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
           paddedNationality, // private nationality witness
           privateValidity    // private validity witness
         );
+        
+        // ONLY mark as eligible if the proof and transaction succeed.
+        setEligibilityResult('eligible');
       }
-    } catch (error: unknown) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+    } catch (error: any) {
+      // User-friendly error mapping
+      let errStr = error?.message || String(error);
+      if (errStr.includes('feature-flags')) {
+        errStr = 'Connection rejected or closed by Lace Wallet.';
+      } else if (errStr.includes('User rejected')) {
+        errStr = 'Transaction was rejected in Lace Wallet.';
+      }
+      setErrorMessage(`Verification Failed: ${errStr}`);
+      setEligibilityResult(null); // Reset state so they can try again
     } finally {
       setIsWorking(false);
+      setProgressMessage('');
     }
   }, [deployedBoardAPI, passportExpiry, nationality, publicRules]);
 
@@ -158,8 +175,15 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
     if (!boardDeployment || boardDeployment.status === 'in-progress') return;
 
     setIsWorking(false);
+    setProgressMessage('');
     if (boardDeployment.status === 'failed') {
-      setErrorMessage(boardDeployment.error.message.length ? boardDeployment.error.message : 'Error.');
+      let errStr = boardDeployment.error.message.length ? boardDeployment.error.message : 'Error connecting to wallet.';
+      if (errStr.includes('feature-flags')) {
+        errStr = 'Wallet connection was rejected or closed by Lace.';
+      } else if (errStr.includes('timed out') || errStr.includes('Could not find')) {
+        errStr = 'Could not find Lace Wallet. Ensure the extension is installed, unlocked, and authorized.';
+      }
+      setErrorMessage(errStr);
       return;
     }
 
@@ -178,35 +202,73 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
   // Initial Uninitialized State (Landing Screen)
   if (!deployedBoardAPI) {
     return (
-      <Container maxWidth="md" sx={{ mt: 10, display: 'flex', justifyContent: 'center' }}>
-        <Paper elevation={0} sx={{ p: 6, borderRadius: 3, border: '1px solid #e5e7eb', textAlign: 'center', width: '100%', maxWidth: 600 }}>
-          <Box sx={{ width: 80, height: 80, borderRadius: '50%', background: '#e0e7ff', display: 'flex', alignItems: 'center', justifyContent: 'center', mx: 'auto', mb: 3 }}>
-            <FlightTakeoffIcon sx={{ fontSize: 40, color: '#3b82f6' }} />
-          </Box>
-          <Typography variant="h4" sx={{ fontWeight: 700, color: '#111827', mb: 2 }}>
-            Private Travel Eligibility
-          </Typography>
-          <Typography variant="body1" sx={{ color: '#4b5563', mb: 5 }}>
-            Connect your Lace Wallet to verify travel requirements using your passport attributes without sending personal information to our servers.
-          </Typography>
-          
-          {errorMessage && (
-            <Alert severity="error" sx={{ mb: 3, borderRadius: 2, textAlign: 'left' }}>
-              {errorMessage}
-            </Alert>
-          )}
+      <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', color: '#f9fafb', background: 'transparent' }}>
+        <Container maxWidth="md" sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', py: 10 }}>
+          <Paper elevation={0} sx={{ 
+            p: { xs: 4, md: 6 }, 
+            borderRadius: 4, 
+            border: '1px solid rgba(255, 255, 255, 0.1)', 
+            background: 'rgba(255, 255, 255, 0.03)', 
+            backdropFilter: 'blur(10px)',
+            textAlign: 'center', 
+            width: '100%', 
+            maxWidth: 520,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center'
+          }}>
+            <Box sx={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(129, 140, 248, 0.1)', border: '1px solid rgba(129, 140, 248, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 4 }}>
+              <FlightTakeoffIcon sx={{ fontSize: 40, color: '#818cf8' }} />
+            </Box>
+            
+            <Typography variant="h4" sx={{ fontWeight: 700, color: '#f9fafb', mb: 2, letterSpacing: '-0.02em' }}>
+              Private Travel Eligibility
+            </Typography>
+            
+            <Typography variant="body1" sx={{ color: '#9ca3af', mb: 5, lineHeight: 1.6 }}>
+              Connect your Lace Wallet to verify travel requirements using your passport attributes without exposing personal data to servers.
+            </Typography>
+            
+            {errorMessage && (
+              <Box sx={{ background: 'rgba(248, 113, 113, 0.05)', border: '1px solid rgba(248, 113, 113, 0.2)', p: 2, borderRadius: 2, width: '100%', textAlign: 'left', mb: 4, display: 'flex', alignItems: 'flex-start', gap: 1.5 }}>
+                 <ErrorOutlinedIcon sx={{ color: '#f87171', mt: 0.2 }} />
+                 <Box>
+                   <Typography variant="body2" sx={{ fontWeight: 600, color: '#fca5a5' }}>Connection Error</Typography>
+                   <Typography variant="body2" sx={{ color: '#fecaca' }}>{errorMessage}</Typography>
+                 </Box>
+              </Box>
+            )}
 
-          <Button 
-            variant="contained" 
-            onClick={onCreateBoard} 
-            disabled={isWorking || boardDeployment?.status === 'in-progress'}
-            fullWidth
-            sx={{ borderRadius: 2, py: 1.5, fontSize: '1rem', fontWeight: 600, textTransform: 'none', background: '#2563eb', '&:hover': { background: '#1d4ed8' }, boxShadow: 'none' }}
-          >
-            {(isWorking || boardDeployment?.status === 'in-progress') ? 'Connecting...' : 'Connect Wallet'}
-          </Button>
-        </Paper>
-      </Container>
+            <Button 
+              variant="contained" 
+              onClick={onCreateBoard} 
+              disabled={isWorking || boardDeployment?.status === 'in-progress'}
+              fullWidth
+              sx={{ 
+                borderRadius: 2, 
+                py: 1.5, 
+                fontSize: '1.05rem', 
+                fontWeight: 600, 
+                textTransform: 'none', 
+                background: '#818cf8', 
+                color: '#fff', 
+                '&:hover': { background: '#6366f1', transform: 'translateY(-1px)' }, 
+                '&.Mui-disabled': { background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.3)' }, 
+                boxShadow: '0 4px 14px 0 rgba(99, 102, 241, 0.2)',
+                transition: 'all 0.2s ease-in-out'
+              }}
+            >
+              {(isWorking || boardDeployment?.status === 'in-progress') ? 'Connecting to Lace...' : 'Connect Wallet'}
+            </Button>
+          </Paper>
+
+          {/* Footer just for the landing page to match brand */}
+          <Box sx={{ mt: 8, display: 'flex', alignItems: 'center', gap: 1 }}>
+            <GppGoodOutlinedIcon sx={{ color: '#818cf8', fontSize: 18 }} />
+            <Typography variant="body2" sx={{ color: '#6b7280', fontWeight: 600 }}>Powered by Midnight ZK technology</Typography>
+          </Box>
+        </Container>
+      </Box>
     );
   }
 
@@ -219,19 +281,19 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
   if (eligibilityResult !== null) activeStep = 2;
 
   return (
-    <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', color: '#111827' }}>
+    <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', color: '#f9fafb' }}>
       <Backdrop sx={{ position: 'absolute', color: '#fff', zIndex: 10 }} open={isWorking || (boardDeployment?.status === 'in-progress')}>
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
           <CircularProgress color="inherit" />
-          <Typography>Processing...</Typography>
+          <Typography>{progressMessage || 'Processing...'}</Typography>
         </Box>
       </Backdrop>
 
       {/* HEADER */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 3, borderBottom: '1px solid #e5e7eb', background: 'white' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 3, borderBottom: '1px solid rgba(255, 255, 255, 0.1)', background: 'rgba(255, 255, 255, 0.03)' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Box sx={{ width: 48, height: 48, borderRadius: '50%', background: '#e0e7ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <FlightTakeoffIcon sx={{ color: '#2563eb' }} />
+          <Box sx={{ width: 48, height: 48, borderRadius: '50%', background: 'rgba(129, 140, 248, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <FlightTakeoffIcon sx={{ color: '#818cf8' }} />
           </Box>
           <Box>
             <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2 }}>Private Travel Eligibility</Typography>
@@ -240,14 +302,14 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
         </Box>
         
         {isWalletConnected && (
-          <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 2, px: 2, py: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+          <Paper elevation={0} sx={{ border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: 2, px: 2, py: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-               <Box sx={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981' }} />
-               <Typography variant="caption" sx={{ fontWeight: 600, color: '#374151' }}>Wallet connected</Typography>
+               <Box sx={{ width: 8, height: 8, borderRadius: '50%', background: '#34d399' }} />
+               <Typography variant="caption" sx={{ fontWeight: 600, color: 'rgba(255, 255, 255, 0.2)' }}>Wallet connected</Typography>
              </Box>
              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
                <Typography variant="caption" sx={{ color: '#6b7280', fontFamily: 'monospace' }}>0x3f2a...8a6f1</Typography>
-               <ContentCopyIcon sx={{ fontSize: 14, color: '#9ca3af', cursor: 'pointer' }} />
+               <ContentCopyIcon sx={{ fontSize: 14, color: '#6b7280', cursor: 'pointer' }} />
              </Box>
           </Paper>
         )}
@@ -258,25 +320,25 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
         {/* PROGRESS INDICATOR */}
         <Box sx={{ maxWidth: 800, mx: 'auto', mb: 6 }}>
           <Stepper activeStep={activeStep} alternativeLabel sx={{
-            '& .MuiStepConnector-line': { borderColor: '#e5e7eb', borderWidth: 2 },
-            '& .Mui-active .MuiStepConnector-line': { borderColor: '#2563eb' },
-            '& .Mui-completed .MuiStepConnector-line': { borderColor: '#2563eb' },
+            '& .MuiStepConnector-line': { borderColor: 'rgba(255, 255, 255, 0.1)', borderWidth: 2 },
+            '& .Mui-active .MuiStepConnector-line': { borderColor: '#818cf8' },
+            '& .Mui-completed .MuiStepConnector-line': { borderColor: '#818cf8' },
           }}>
             <Step>
-              <StepLabel sx={{ '& .MuiStepIcon-root': { color: activeStep >= 0 ? '#2563eb' : '#d1d5db' } }}>
-                <Typography sx={{ fontWeight: 600, color: '#111827' }}>Destination</Typography>
+              <StepLabel sx={{ '& .MuiStepIcon-root': { color: activeStep >= 0 ? '#818cf8' : 'rgba(255, 255, 255, 0.2)' } }}>
+                <Typography sx={{ fontWeight: 600, color: '#f9fafb' }}>Destination</Typography>
                 <Typography variant="caption" sx={{ color: '#6b7280' }}>Get requirements</Typography>
               </StepLabel>
             </Step>
             <Step>
-              <StepLabel sx={{ '& .MuiStepIcon-root': { color: activeStep >= 1 ? '#2563eb' : '#d1d5db' } }}>
-                <Typography sx={{ fontWeight: 600, color: '#111827' }}>Passport Info</Typography>
+              <StepLabel sx={{ '& .MuiStepIcon-root': { color: activeStep >= 1 ? '#818cf8' : 'rgba(255, 255, 255, 0.2)' } }}>
+                <Typography sx={{ fontWeight: 600, color: '#f9fafb' }}>Passport Info</Typography>
                 <Typography variant="caption" sx={{ color: '#6b7280' }}>Private & secure</Typography>
               </StepLabel>
             </Step>
             <Step>
-              <StepLabel sx={{ '& .MuiStepIcon-root': { color: activeStep >= 2 ? '#2563eb' : '#d1d5db' } }}>
-                <Typography sx={{ fontWeight: 600, color: '#111827' }}>Result</Typography>
+              <StepLabel sx={{ '& .MuiStepIcon-root': { color: activeStep >= 2 ? '#818cf8' : 'rgba(255, 255, 255, 0.2)' } }}>
+                <Typography sx={{ fontWeight: 600, color: '#f9fafb' }}>Result</Typography>
                 <Typography variant="caption" sx={{ color: '#6b7280' }}>Eligibility result</Typography>
               </StepLabel>
             </Step>
@@ -284,14 +346,14 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
         </Box>
 
         {/* 3 CARDS */}
-        <Grid container spacing={3}>
+        <Grid container spacing={3} sx={{ alignItems: 'stretch' }}>
           {/* CARD 1: DESTINATION */}
           <Grid size={{ xs: 12, md: 4 }}>
-            <Card elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 3, height: '100%' }}>
+            <Card elevation={0} sx={{ border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: 3, height: '100%' }}>
               <CardContent sx={{ p: 3 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-                  <Box sx={{ width: 48, height: 48, borderRadius: '50%', background: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <LanguageIcon sx={{ color: '#2563eb' }} />
+                  <Box sx={{ width: 48, height: 48, borderRadius: '50%', background: 'rgba(129, 140, 248, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <LanguageIcon sx={{ color: '#818cf8' }} />
                   </Box>
                   <Box>
                     <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Where are you travelling?</Typography>
@@ -300,8 +362,15 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
                 </Box>
                 
                 <FormControl fullWidth sx={{ mb: 3 }}>
-                  <InputLabel>Destination</InputLabel>
-                  <Select value={destination} label="Destination" onChange={(e) => { setDestination(e.target.value); setPublicRules(null); }}>
+                  <InputLabel id="destination-label" sx={{ color: '#9ca3af', '&.Mui-focused': { color: '#818cf8' } }}>Destination</InputLabel>
+                  <Select MenuProps={{ slotProps: { paper: { sx: { bgcolor: '#374151', color: '#f9fafb' } } } }} sx={{ color: '#f9fafb', '.MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' }, '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.3)' }, '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#818cf8' }, '.MuiSvgIcon-root': { color: '#9ca3af' } }} 
+                    labelId="destination-label"
+                    value={destination} 
+                    label="Destination" 
+                    onChange={(e) => { setDestination(e.target.value); setPublicRules(null); }}
+                    displayEmpty
+                  >
+                    <MenuItem value="" disabled><em>Choose destination</em></MenuItem>
                     <MenuItem value="France">🇫🇷 France</MenuItem>
                     <MenuItem value="Japan">🇯🇵 Japan</MenuItem>
                     <MenuItem value="USA">🇺🇸 United States</MenuItem>
@@ -313,26 +382,27 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
                 <Button 
                   variant="contained" 
                   fullWidth 
+                  disabled={!destination}
                   onClick={fetchRules}
-                  sx={{ borderRadius: 2, py: 1.5, textTransform: 'none', fontWeight: 600, background: '#2563eb', '&:hover': { background: '#1d4ed8' }, boxShadow: 'none' }}
+                  sx={{ borderRadius: 2, py: 1.5, textTransform: 'none', fontWeight: 600, background: '#818cf8', color: '#fff', '&:hover': { background: '#6366f1' }, '&.Mui-disabled': { background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.3)' }, boxShadow: 'none' }}
                 >
                   Retrieve Requirements
                 </Button>
 
                 {publicRules && (
                   <Box sx={{ mt: 3 }}>
-                    <Typography variant="subtitle2" sx={{ color: '#2563eb', fontWeight: 600, mb: 1 }}>Travel Requirements</Typography>
+                    <Typography variant="subtitle2" sx={{ color: '#818cf8', fontWeight: 600, mb: 1 }}>Travel Requirements</Typography>
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 1, borderRadius: 1, background: '#f9fafb' }}>
-                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: '#4b5563' }}><FlightIcon fontSize="small"/> <Typography variant="body2">Passport validity</Typography></Box>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 1, borderRadius: 1, background: 'rgba(255, 255, 255, 0.02)' }}>
+                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'rgba(255, 255, 255, 0.2)' }}><FlightIcon fontSize="small"/> <Typography variant="body2">Passport validity</Typography></Box>
                          <Typography variant="body2" sx={{ fontWeight: 600 }}>At least {publicRules.minimumPassportValidityDays} days</Typography>
                       </Box>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 1, borderRadius: 1, background: '#f9fafb' }}>
-                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: '#4b5563' }}><PersonIcon fontSize="small"/> <Typography variant="body2">Eligible nationalities</Typography></Box>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 1, borderRadius: 1, background: 'rgba(255, 255, 255, 0.02)' }}>
+                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'rgba(255, 255, 255, 0.2)' }}><PersonIcon fontSize="small"/> <Typography variant="body2">Eligible nationalities</Typography></Box>
                          <Typography variant="body2" sx={{ fontWeight: 600 }}>All nationalities</Typography>
                       </Box>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 1, borderRadius: 1, background: '#f9fafb' }}>
-                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: '#4b5563' }}><InfoOutlinedIcon fontSize="small"/> <Typography variant="body2">Policy</Typography></Box>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 1, borderRadius: 1, background: 'rgba(255, 255, 255, 0.02)' }}>
+                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'rgba(255, 255, 255, 0.2)' }}><InfoOutlinedIcon fontSize="small"/> <Typography variant="body2">Policy</Typography></Box>
                          <Typography variant="body2" sx={{ fontWeight: 600 }}>{publicRules.policyVersion}</Typography>
                       </Box>
                     </Box>
@@ -344,21 +414,21 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
 
           {/* CARD 2: PASSPORT INFO */}
           <Grid size={{ xs: 12, md: 4 }}>
-            <Card elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 3, height: '100%', opacity: publicRules ? 1 : 0.6, transition: 'opacity 0.2s' }}>
+            <Card elevation={0} sx={{ border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: 3, height: '100%', opacity: publicRules ? 1 : 0.6, transition: 'opacity 0.2s' }}>
               <CardContent sx={{ p: 3 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-                  <Box sx={{ width: 48, height: 48, borderRadius: '50%', background: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <LockIcon sx={{ color: '#2563eb' }} />
+                  <Box sx={{ width: 48, height: 48, borderRadius: '50%', background: 'rgba(129, 140, 248, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <LockIcon sx={{ color: '#818cf8' }} />
                   </Box>
                   <Box>
                     <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Your passport information</Typography>
-                    <Chip size="small" icon={<LockIcon sx={{ fontSize: 14 }} />} label="Private • Only on your device" sx={{ background: '#eff6ff', color: '#2563eb', fontWeight: 600, mt: 0.5, border: 'none' }} />
+                    <Chip size="small" icon={<LockIcon sx={{ fontSize: 14 }} />} label="Private • Only on your device" sx={{ background: 'rgba(129, 140, 248, 0.1)', color: '#818cf8', fontWeight: 600, mt: 0.5, border: 'none' }} />
                   </Box>
                 </Box>
 
                 <FormControl fullWidth sx={{ mb: 2 }}>
-                  <InputLabel>Passport nationality</InputLabel>
-                  <Select value={nationality} label="Passport nationality" onChange={(e) => setNationality(e.target.value)} disabled={!publicRules}>
+                  <InputLabel sx={{ color: '#9ca3af', '&.Mui-focused': { color: '#818cf8' } }}>Passport nationality</InputLabel>
+                  <Select MenuProps={{ slotProps: { paper: { sx: { bgcolor: '#374151', color: '#f9fafb' } } } }} sx={{ color: '#f9fafb', '.MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' }, '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.3)' }, '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#818cf8' }, '.MuiSvgIcon-root': { color: '#9ca3af' } }} value={nationality} label="Passport nationality" onChange={(e) => setNationality(e.target.value)} disabled={!publicRules}>
                     <MenuItem value="India">🇮🇳 India</MenuItem>
                     <MenuItem value="Japan">🇯🇵 Japan</MenuItem>
                     <MenuItem value="USA">🇺🇸 United States</MenuItem>
@@ -367,8 +437,7 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
                   </Select>
                 </FormControl>
 
-                <TextField
-                  type="date"
+                <TextField slotProps={{ inputLabel: { sx: { color: '#9ca3af', '&.Mui-focused': { color: '#818cf8' } } }, input: { sx: { color: '#f9fafb', '.MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' }, '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.3)' }, '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#818cf8' } } } }} type="date"
                   label="Passport expiry date"
                   fullWidth
                   value={passportExpiry}
@@ -377,17 +446,17 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
                   sx={{ mb: 3 }}
                 />
 
-                <Box sx={{ background: '#eff6ff', p: 2, borderRadius: 2, display: 'flex', alignItems: 'flex-start', gap: 1.5, mb: 2 }}>
-                  <GppGoodOutlinedIcon sx={{ color: '#2563eb', mt: 0.2 }} />
+                <Box sx={{ background: 'rgba(129, 140, 248, 0.1)', p: 2, borderRadius: 2, display: 'flex', alignItems: 'flex-start', gap: 1.5, mb: 2 }}>
+                  <GppGoodOutlinedIcon sx={{ color: '#818cf8', mt: 0.2 }} />
                   <Box>
-                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#1e40af' }}>Your data stays private</Typography>
-                    <Typography variant="caption" sx={{ color: '#3b82f6' }}>We never send your passport information to our servers.</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#a5b4fc' }}>Your data stays private</Typography>
+                    <Typography variant="caption" sx={{ color: '#818cf8' }}>We never send your passport information to our servers.</Typography>
                   </Box>
                 </Box>
 
-                <Accordion elevation={0} disableGutters sx={{ mb: 3, border: '1px solid #e5e7eb', borderRadius: '8px !important', '&:before': { display: 'none' } }}>
+                <Accordion elevation={0} disableGutters sx={{ mb: 3, border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px !important', '&:before': { display: 'none' } }}>
                   <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ minHeight: 40, '.MuiAccordionSummary-content': { my: 1 } }}>
-                    <Typography variant="body2" sx={{ fontWeight: 600, color: '#374151' }}>What stays private?</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 600, color: 'rgba(255, 255, 255, 0.2)' }}>What stays private?</Typography>
                   </AccordionSummary>
                   <AccordionDetails sx={{ pt: 0, color: '#6b7280' }}>
                     <Typography variant="caption">
@@ -403,7 +472,7 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
                   fullWidth 
                   disabled={!publicRules}
                   onClick={onVerifyEligibility}
-                  sx={{ borderRadius: 2, py: 1.5, textTransform: 'none', fontWeight: 600, background: '#2563eb', '&:hover': { background: '#1d4ed8' }, boxShadow: 'none' }}
+                  sx={{ borderRadius: 2, py: 1.5, textTransform: 'none', fontWeight: 600, background: '#818cf8', color: '#fff', '&:hover': { background: '#6366f1' }, '&.Mui-disabled': { background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.3)' }, boxShadow: 'none' }}
                 >
                   Check My Eligibility
                 </Button>
@@ -413,13 +482,13 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
 
           {/* CARD 3: RESULT */}
           <Grid size={{ xs: 12, md: 4 }}>
-            <Card elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <Card elevation={0} sx={{ border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
               <CardContent sx={{ p: 3, flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
                 
                 {eligibilityResult === null && (
                   <Box sx={{ textAlign: 'center', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 4, alignSelf: 'flex-start', width: '100%' }}>
-                        <Box sx={{ width: 48, height: 48, borderRadius: '50%', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Box sx={{ width: 48, height: 48, borderRadius: '50%', background: 'rgba(255, 255, 255, 0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           <Typography variant="h6" sx={{ color: '#6b7280', fontWeight: 700 }}>?</Typography>
                         </Box>
                         <Box sx={{ textAlign: 'left' }}>
@@ -428,54 +497,56 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
                         </Box>
                      </Box>
                      
-                     <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.3 }}>
-                        <LuggageIcon sx={{ fontSize: 120, color: '#9ca3af' }} />
+                     <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.1 }}>
+                        <LuggageIcon sx={{ fontSize: 80, color: '#6b7280' }} />
                      </Box>
                   </Box>
                 )}
 
                 {eligibilityResult === 'eligible' && (
-                  <Box sx={{ textAlign: 'center', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                     <Box sx={{ width: 48, height: 48, borderRadius: '50%', background: '#d1fae5', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 2 }}>
-                       <CheckCircleOutlinedIcon sx={{ color: '#10b981' }} />
+                  <Box sx={{ textAlign: 'center', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                     <Box sx={{ width: 64, height: 64, borderRadius: '50%', background: 'rgba(52, 211, 153, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 2 }}>
+                       <CheckCircleOutlinedIcon sx={{ color: '#34d399', fontSize: 32 }} />
                      </Box>
-                     <Typography variant="h5" sx={{ fontWeight: 700, color: '#111827', mb: 0.5 }}>ELIGIBLE</Typography>
-                     <Typography variant="body2" sx={{ color: '#6b7280', mb: 4 }}>You meet the travel requirements.</Typography>
+                     <Typography variant="h5" sx={{ fontWeight: 700, color: '#f9fafb', mb: 1 }}>ELIGIBLE</Typography>
+                     <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.2)', mb: 3 }}>Your passport satisfies the selected travel requirements.</Typography>
                      
-                     <Box sx={{ width: '100%', textAlign: 'left', mb: 3 }}>
-                       <Box sx={{ display: 'flex', justifyContent: 'space-between', p: 1.5, borderBottom: '1px solid #f3f4f6' }}>
+                     <Box sx={{ width: '100%', textAlign: 'left', mb: 3, border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: 2, overflow: 'hidden' }}>
+                       <Box sx={{ display: 'flex', justifyContent: 'space-between', p: 2, background: 'rgba(255, 255, 255, 0.02)', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
                          <Typography variant="body2" sx={{ color: '#6b7280' }}>Destination</Typography>
                          <Typography variant="body2" sx={{ fontWeight: 600 }}>{publicRules?.destination || destination}</Typography>
                        </Box>
-                       <Box sx={{ display: 'flex', justifyContent: 'space-between', p: 1.5, borderBottom: '1px solid #f3f4f6' }}>
-                         <Typography variant="body2" sx={{ color: '#6b7280' }}>Policy version</Typography>
+                       <Box sx={{ display: 'flex', justifyContent: 'space-between', p: 2, background: 'rgba(255, 255, 255, 0.05)' }}>
+                         <Typography variant="body2" sx={{ color: '#6b7280' }}>Policy</Typography>
                          <Typography variant="body2" sx={{ fontWeight: 600 }}>{publicRules?.policyVersion || 'FRA-DEMO-v1'}</Typography>
                        </Box>
                      </Box>
 
-                     {boardState?.is_occupied && (
-                        <Box sx={{ background: '#f0fdf4', border: '1px solid #bbf7d0', p: 2, borderRadius: 2, width: '100%', display: 'flex', gap: 1, alignItems: 'flex-start', textAlign: 'left' }}>
-                          <CheckCircleOutlinedIcon sx={{ color: '#16a34a', fontSize: 20 }} />
-                          <Box>
-                            <Typography variant="body2" sx={{ fontWeight: 600, color: '#16a34a' }}>Attestation Complete</Typography>
-                            <Typography variant="caption" sx={{ color: '#15803d' }}>Your privacy-preserving proof is confirmed.</Typography>
-                          </Box>
+                     <Box sx={{ background: 'rgba(74, 222, 128, 0.05)', border: '1px solid rgba(74, 222, 128, 0.2)', p: 2, borderRadius: 2, width: '100%', display: 'flex', gap: 1.5, alignItems: 'flex-start', textAlign: 'left', mb: 2 }}>
+                        <GppGoodOutlinedIcon sx={{ color: '#4ade80', mt: 0.2 }} />
+                        <Box>
+                          <Typography variant="body2" sx={{ fontWeight: 600, color: '#4ade80' }}>Proof verified on Midnight.</Typography>
+                          <Typography variant="caption" sx={{ color: '#86efac' }}>Your eligibility was cryptographically proven without revealing your passport data.</Typography>
                         </Box>
-                     )}
+                     </Box>
+
+                     <Button variant="outlined" fullWidth sx={{ textTransform: 'none', fontWeight: 600, color: '#818cf8', borderColor: 'rgba(129,140,248,0.3)' }}>
+                        View / Copy Attestation
+                     </Button>
                   </Box>
                 )}
 
                 {eligibilityResult === 'not_eligible' && (
                   <Box sx={{ textAlign: 'center', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                     <Box sx={{ width: 48, height: 48, borderRadius: '50%', background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 2 }}>
-                       <ErrorOutlinedIcon sx={{ color: '#ef4444' }} />
+                     <Box sx={{ width: 48, height: 48, borderRadius: '50%', background: 'rgba(248, 113, 113, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 2 }}>
+                       <ErrorOutlinedIcon sx={{ color: '#f87171' }} />
                      </Box>
-                     <Typography variant="h5" sx={{ fontWeight: 700, color: '#111827', mb: 0.5 }}>NOT ELIGIBLE</Typography>
+                     <Typography variant="h5" sx={{ fontWeight: 700, color: '#f9fafb', mb: 0.5 }}>NOT ELIGIBLE</Typography>
                      <Typography variant="body2" sx={{ color: '#6b7280', mb: 4 }}>You do not meet the travel requirements.</Typography>
                      
-                     <Box sx={{ background: '#fef2f2', border: '1px solid #fecaca', p: 2, borderRadius: 2, width: '100%', textAlign: 'left' }}>
-                        <Typography variant="body2" sx={{ fontWeight: 600, color: '#b91c1c', mb: 1 }}>Reason:</Typography>
-                        <Typography variant="body2" sx={{ color: '#991b1b' }}>{localError}</Typography>
+                     <Box sx={{ background: 'rgba(248, 113, 113, 0.05)', border: '1px solid rgba(248, 113, 113, 0.2)', p: 2, borderRadius: 2, width: '100%', textAlign: 'left' }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600, color: '#fca5a5', mb: 1 }}>Reason:</Typography>
+                        <Typography variant="body2" sx={{ color: 'rgba(248, 113, 113, 0.2)' }}>{localError}</Typography>
                      </Box>
                   </Box>
                 )}
@@ -491,52 +562,52 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
         )}
 
         {/* BOTTOM SECTION */}
-        <Box sx={{ mt: 6, display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 4, alignItems: 'flex-start' }}>
+        <Box sx={{ mt: 6, display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 4, alignItems: 'stretch' }}>
            
            {/* HOW IT WORKS */}
-           <Box sx={{ flexGrow: 1, background: 'white', border: '1px solid #e5e7eb', borderRadius: 3, p: 3 }}>
+           <Box sx={{ flexGrow: 1, background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: 3, p: 3 }}>
              <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 3 }}>How it works</Typography>
              
              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', overflowX: 'auto', pb: 1, gap: 2 }}>
                 <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', minWidth: 80 }}>
-                   <Box sx={{ width: 40, height: 40, borderRadius: '50%', border: '2px solid #2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-                     <PersonIcon sx={{ color: '#2563eb' }} />
+                   <Box sx={{ width: 40, height: 40, borderRadius: '50%', border: '2px solid #818cf8', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
+                     <PersonIcon sx={{ color: '#818cf8' }} />
                    </Box>
                    <Typography variant="caption" sx={{ fontWeight: 700 }}>Your Data</Typography>
                    <Typography variant="caption" sx={{ color: '#6b7280' }}>(Private)</Typography>
                 </Box>
-                <Typography sx={{ color: '#9ca3af' }}>→</Typography>
+                <Typography sx={{ color: '#6b7280' }}>→</Typography>
 
                 <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', minWidth: 80 }}>
-                   <Box sx={{ width: 40, height: 40, borderRadius: '50%', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
+                   <Box sx={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(255, 255, 255, 0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
                      <LockIcon sx={{ color: '#6b7280' }} />
                    </Box>
                    <Typography variant="caption" sx={{ fontWeight: 700 }}>Local Evaluation</Typography>
                    <Typography variant="caption" sx={{ color: '#6b7280' }}>(On Your Device)</Typography>
                 </Box>
-                <Typography sx={{ color: '#9ca3af' }}>→</Typography>
+                <Typography sx={{ color: '#6b7280' }}>→</Typography>
 
                 <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', minWidth: 80 }}>
-                   <Box sx={{ width: 40, height: 40, borderRadius: '50%', border: '2px solid #2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-                     <GppGoodOutlinedIcon sx={{ color: '#2563eb' }} />
+                   <Box sx={{ width: 40, height: 40, borderRadius: '50%', border: '2px solid #818cf8', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
+                     <GppGoodOutlinedIcon sx={{ color: '#818cf8' }} />
                    </Box>
                    <Typography variant="caption" sx={{ fontWeight: 700 }}>Eligibility Result</Typography>
                    <Typography variant="caption" sx={{ color: '#6b7280' }}>(Private)</Typography>
                 </Box>
-                <Typography sx={{ color: '#9ca3af' }}>→</Typography>
+                <Typography sx={{ color: '#6b7280' }}>→</Typography>
 
                 <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', minWidth: 80 }}>
-                   <Box sx={{ width: 40, height: 40, borderRadius: '50%', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
+                   <Box sx={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(255, 255, 255, 0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
                      <LockIcon sx={{ color: '#6b7280' }} />
                    </Box>
                    <Typography variant="caption" sx={{ fontWeight: 700 }}>Attestation</Typography>
                    <Typography variant="caption" sx={{ color: '#6b7280' }}>(Optional)</Typography>
                 </Box>
-                <Typography sx={{ color: '#9ca3af' }}>→</Typography>
+                <Typography sx={{ color: '#6b7280' }}>→</Typography>
 
                 <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', minWidth: 80 }}>
-                   <Box sx={{ width: 40, height: 40, borderRadius: '50%', border: '2px solid #2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-                     <LanguageIcon sx={{ color: '#2563eb' }} />
+                   <Box sx={{ width: 40, height: 40, borderRadius: '50%', border: '2px solid #818cf8', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
+                     <LanguageIcon sx={{ color: '#818cf8' }} />
                    </Box>
                    <Typography variant="caption" sx={{ fontWeight: 700 }}>Midnight Network</Typography>
                    <Typography variant="caption" sx={{ color: '#6b7280' }}>(Privacy-Preserving)</Typography>
@@ -545,12 +616,12 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
            </Box>
 
            {/* MVP LIMITATION */}
-           <Box sx={{ width: { xs: '100%', md: 350 }, flexShrink: 0, background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 3, p: 3, display: 'flex', flexDirection: 'column' }}>
+           <Box sx={{ width: { xs: '100%', md: 350 }, flexShrink: 0, background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: 3, p: 3, display: 'flex', flexDirection: 'column' }}>
              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
                 <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>MVP Limitation</Typography>
-                <InfoOutlinedIcon sx={{ color: '#9ca3af', fontSize: 20 }} />
+                <InfoOutlinedIcon sx={{ color: '#6b7280', fontSize: 20 }} />
              </Box>
-             <Typography variant="body2" sx={{ color: '#4b5563', lineHeight: 1.6 }}>
+             <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.2)', lineHeight: 1.6 }}>
                Eligibility calculation is currently performed locally in your browser. The current Midnight ZK proof proves authorization to submit the attestation, not the correctness of the eligibility calculation.
              </Typography>
            </Box>
@@ -558,12 +629,12 @@ export const TravelDashboard: React.FC<Readonly<TravelDashboardProps>> = ({ boar
       </Container>
       
       {/* FOOTER */}
-      <Box sx={{ borderTop: '1px solid #e5e7eb', py: 3, px: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'white', mt: 'auto' }}>
+      <Box sx={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)', py: 3, px: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255, 255, 255, 0.03)', mt: 'auto' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <GppGoodOutlinedIcon sx={{ color: '#2563eb', fontSize: 18 }} />
+          <GppGoodOutlinedIcon sx={{ color: '#818cf8', fontSize: 18 }} />
           <Typography variant="body2" sx={{ color: '#6b7280', fontWeight: 600 }}>Powered by Midnight</Typography>
         </Box>
-        <Link href="#" underline="hover" sx={{ color: '#2563eb', variant: 'body2', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+        <Link href="#" underline="hover" sx={{ color: '#818cf8', variant: 'body2', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 0.5 }}>
           Learn more about Midnight <LanguageIcon sx={{ fontSize: 16 }} />
         </Link>
       </Box>

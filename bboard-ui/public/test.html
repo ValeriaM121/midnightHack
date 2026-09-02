@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Lace Minimal Test (UUID Discovery)</title>
+  <style>
+    body { font-family: sans-serif; padding: 2rem; max-width: 800px; margin: 0 auto; }
+    button { padding: 10px 20px; font-size: 16px; cursor: pointer; background: #2563eb; color: white; border: none; border-radius: 4px; margin-bottom: 20px; }
+    #log { background: #1e1e1e; color: #a6e22e; padding: 1rem; overflow: auto; min-height: 300px; border-radius: 4px; font-family: monospace; white-space: pre-wrap; }
+    .error { color: #f92672; }
+    .info { color: #66d9ef; }
+  </style>
+</head>
+<body>
+  <h1>Lace Connection Test (UUID Discovery)</h1>
+  <p>This page uses the exact discovery mechanism from the application.</p>
+  <button id="connectBtn">Connect to Wallet</button>
+  <pre id="log"></pre>
+
+  <script>
+    function logMessage(msg, type = 'info') {
+      const logEl = document.getElementById('log');
+      const span = document.createElement('span');
+      span.className = type;
+      span.innerText = msg + '\n';
+      logEl.appendChild(span);
+      console.log(msg);
+    }
+
+    document.getElementById('connectBtn').addEventListener('click', async () => {
+      document.getElementById('log').innerHTML = ''; // Clear logs on click
+      
+      try {
+        logMessage('--- 1. Discovering Midnight Wallets ---');
+        const midnightObj = window.midnight;
+        if (!midnightObj) {
+          logMessage('Error: window.midnight is undefined.', 'error');
+          return;
+        }
+
+        const wallets = Object.entries(midnightObj);
+        logMessage(`Found ${wallets.length} wallet keys in window.midnight`);
+
+        let targetWallet = null;
+        let targetWalletKey = null;
+
+        for (const [key, wallet] of wallets) {
+          logMessage(`\n--- Inspecting Wallet Key: ${key} ---`);
+          logMessage(`typeof wallet: ${typeof wallet}`);
+          
+          if (wallet && typeof wallet === 'object') {
+            const props = Object.getOwnPropertyNames(wallet).concat(Object.keys(wallet));
+            logMessage(`Available properties/methods (enumerable): ${JSON.stringify([...new Set(props)])}`);
+            
+            if ('apiVersion' in wallet) {
+              logMessage(`Found apiVersion: ${wallet.apiVersion}`);
+              
+              // Mimic semver.satisfies(apiVersion, '4.x')
+              if (wallet.apiVersion.startsWith('4.')) {
+                logMessage(`Wallet is COMPATIBLE with 4.x!`);
+                targetWallet = wallet;
+                targetWalletKey = key;
+              } else {
+                logMessage(`Wallet is NOT compatible (requires 4.x)`);
+              }
+            } else {
+              logMessage(`No apiVersion found on this object.`);
+            }
+          }
+        }
+
+        if (!targetWallet) {
+          logMessage('\nError: Could not find any compatible wallet object (requires apiVersion 4.x).', 'error');
+          return;
+        }
+
+        logMessage(`\n--- 2. Selected Wallet: ${targetWalletKey} ---`);
+        logMessage(`apiVersion: ${targetWallet.apiVersion}`);
+        logMessage(`name: ${targetWallet.name}`);
+        logMessage(`icon available: ${!!targetWallet.icon}`);
+
+        logMessage('\n--- 3. Calling connect("preprod") ---');
+        logMessage('WAITING FOR LACE AUTHORIZATION POPUP... (Check your extension!)', 'info');
+        
+        // Execute the exact connection call used by the application
+        const connected = await targetWallet.connect('preprod');
+        
+        logMessage('\n--- 4. SUCCESS! ---');
+        logMessage(`connect() returned successfully.`);
+        
+      } catch (err) {
+        logMessage('\n--- ERROR CAUGHT DURING CONNECT() ---', 'error');
+        logMessage(`Name: ${err.name}`, 'error');
+        logMessage(`Message: ${err.message}`, 'error');
+        logMessage(`Stack:\n${err.stack}`, 'error');
+        if (err.cause) {
+          logMessage(`Cause: ${JSON.stringify(err.cause)}`, 'error');
+        }
+      }
+    });
+  </script>
+</body>
+</html>
